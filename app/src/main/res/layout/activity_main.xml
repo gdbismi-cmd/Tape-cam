@@ -38,6 +38,7 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
+        <TextView android:id="@+id/btnLevel" style="@style/CtrlButton" android:text="LEVEL ○" />
         <TextView android:id="@+id/btnRotate" style="@style/CtrlButton" android:text="ROTATE" />
         <TextView android:id="@+id/btnFlip" style="@style/CtrlButton" android:text="FLIP" />
         <TextView android:id="@+id/btnMode" style="@style/CtrlButton" android:text="VIDEO" />

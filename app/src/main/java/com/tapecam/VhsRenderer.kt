@@ -22,7 +22,11 @@ import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
+import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sin
 import kotlin.random.Random
 
 /**
@@ -79,8 +83,10 @@ class VhsRenderer(private val osd: OsdOverlay) : SurfaceTexture.OnFrameAvailable
     private var camTexId = 0
     private var bufW = 1280
     private var bufH = 960
-    /** Clockwise degrees to turn the camera buffer upright; set by the activity. */
-    @Volatile var rotationDeg = 0
+    /** Degrees to turn the natural-orientation camera image; any angle (set from gravity). */
+    @Volatile var rotationDeg = 90f
+    /** Camera mounting angle; tells us whether the natural-orientation image is portrait. */
+    @Volatile var sensorOrientation = 90
     private val stMatrix = FloatArray(16)
     private val adjust = FloatArray(16)
     private val camMatrix = FloatArray(16)
@@ -257,26 +263,33 @@ class VhsRenderer(private val osd: OsdOverlay) : SurfaceTexture.OnFrameAvailable
     }
 
     /**
-     * Maps output UV (upright, 4:3) to camera-buffer UV: centre-crop to 4:3,
-     * mirror for the selfie camera, rotate to upright, then apply the
-     * SurfaceTexture's own transform.
+     * Maps output UV (4:3) to camera-buffer UV.
+     *
+     * The camera framework already bakes the sensor's mounting angle (and the
+     * selfie mirror) into the SurfaceTexture matrix, so after [stMatrix] the image
+     * is upright in the phone's *natural* (portrait) orientation. On top of that we
+     * rotate by [rotationDeg] — driven by gravity, so the picture follows how the
+     * phone is held — and zoom just enough that the rotated 4:3 frame never shows
+     * empty corners. Maths is done in aspect-correct space so any angle works.
      */
     private fun updateCamMatrix() {
-        val rot = rotationDeg
-        val swapped = rot % 180 != 0
-        val bw = (if (swapped) bufH else bufW).toFloat()
-        val bh = (if (swapped) bufW else bufH).toFloat()
-        val aspect = bw / bh
-        val target = 4f / 3f
-        var sx = 1f
-        var sy = 1f
-        if (aspect > target) sx = target / aspect else sy = aspect / target
-        if (frontCamera) sx = -sx
+        val swapped = sensorOrientation % 180 != 0
+        val iw = (if (swapped) bufH else bufW).toFloat()
+        val ih = (if (swapped) bufW else bufH).toFloat()
+        val ai = iw / ih          // natural-orientation image aspect
+        val ao = 4f / 3f          // output aspect
+
+        val deg = rotationDeg
+        val rad = Math.toRadians(deg.toDouble())
+        val c = abs(cos(rad)).toFloat()
+        val s = abs(sin(rad)).toFloat()
+        val k = min(ai / (ao * c + s), 1f / (ao * s + c))
 
         Matrix.setIdentityM(adjust, 0)
         Matrix.translateM(adjust, 0, 0.5f, 0.5f, 0f)
-        Matrix.rotateM(adjust, 0, rot.toFloat(), 0f, 0f, 1f)
-        Matrix.scaleM(adjust, 0, sx, sy, 1f)
+        Matrix.scaleM(adjust, 0, 1f / ai, 1f, 1f)
+        Matrix.rotateM(adjust, 0, deg, 0f, 0f, 1f)
+        Matrix.scaleM(adjust, 0, k * ao, k, 1f)
         Matrix.translateM(adjust, 0, -0.5f, -0.5f, 0f)
         Matrix.multiplyMM(camMatrix, 0, stMatrix, 0, adjust, 0)
     }

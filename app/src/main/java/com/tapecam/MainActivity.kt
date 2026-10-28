@@ -6,6 +6,13 @@ import android.app.TimePickerDialog
 import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.hypot
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -43,6 +50,8 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
     private var cameraProvider: ProcessCameraProvider? = null
     private var preview: Preview? = null
     private var camera: Camera? = null
+    private var levelMode = false
+    private lateinit var btnLevel: TextView
     private var useFront = false
     private var photoMode = false
     private var recorder: VhsRecorder? = null
@@ -118,6 +127,14 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
             val key = rotationKey()
             prefs.edit().putInt(key, (prefs.getInt(key, 0) + 90) % 360).apply()
             syncRotation()
+        }
+        levelMode = prefs.getBoolean("level", false)
+        btnLevel = findViewById(R.id.btnLevel)
+        btnLevel.setOnClickListener {
+            levelMode = !levelMode
+            prefs.edit().putBoolean("level", levelMode).apply()
+            applyRotation()
+            updateUi()
         }
         btnRotate.setOnLongClickListener {
             prefs.edit().remove(rotationKey()).apply()
@@ -278,6 +295,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
         )
         btnMode.text = if (photoMode) "PHOTO" else "VIDEO"
         btnDate.text = if (osd.dateEnabled) "DATE ●" else "DATE ○"
+        if (::btnLevel.isInitialized) btnLevel.text = if (levelMode) "LEVEL ●" else "LEVEL ○"
         val idleAlpha = if (recording) 0.35f else 1f
         btnMode.alpha = idleAlpha
         btnFlip.alpha = idleAlpha
@@ -300,6 +318,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
 
     override fun onPause() {
         super.onPause()
+        (getSystemService(Context.SENSOR_SERVICE) as SensorManager).unregisterListener(gravityListener)
         if (recorder != null) stopRecording()
     }
 
@@ -329,17 +348,57 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
         if (hasFocus) syncRotation()
     }
 
-    /**
-     * Works out how far to turn the camera image from the sensor's mounting angle
-     * and the current screen rotation, plus any manual correction from ROTATE.
-     */
+    /** Tells CameraX/renderer about the camera, then re-applies the gravity angle. */
     private fun syncRotation() {
         val r = displayRotation()
         preview?.let { if (it.targetRotation != r) it.targetRotation = r }
-        val cam = camera ?: return
-        val auto = cam.cameraInfo.getSensorRotationDegrees(r)
-        val manual = prefs.getInt(rotationKey(), 0)
-        renderer.rotationDeg = (auto + manual) % 360
+        camera?.let { renderer.sensorOrientation = it.cameraInfo.sensorRotationDegrees }
+        applyRotation()
+    }
+
+    // ---------------------------------------------------------------- gravity / gyro
+
+    /**
+     * The gravity sensor (fused with the gyro on most phones) tells us which way is
+     * really up. Normal mode snaps the picture to the nearest 90° — hold the phone
+     * any way round and the tape stays upright. LEVEL mode follows every degree,
+     * like a horizon lock, zooming in slightly to hide the corners.
+     */
+    private val gravityListener = object : SensorEventListener {
+        override fun onSensorChanged(e: SensorEvent) {
+            // Low-pass to calm hand shake.
+            gx += (e.values[0] - gx) * 0.15f
+            gy += (e.values[1] - gy) * 0.15f
+            if (hypot(gx, gy) < 3f) return   // phone lying flat: keep last angle
+
+            val angle = Math.toDegrees(atan2(gx, gy).toDouble()).toFloat()
+            levelAngle = angle
+            if (abs(angleDiff(angle, snappedAngle)) > 55f) {
+                snappedAngle = ((Math.round(angle / 90f) * 90) % 360 + 360) % 360f
+            }
+            applyRotation()
+        }
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+
+    private var gx = 9.8f        // start as if held in normal landscape
+    private var gy = 0f
+    private var levelAngle = 90f
+    private var snappedAngle = 90f
+
+    private fun applyRotation() {
+        val base = if (levelMode) levelAngle else snappedAngle
+        renderer.rotationDeg = base + prefs.getInt(rotationKey(), 0)
+    }
+
+    private fun angleDiff(a: Float, b: Float) = ((a - b + 540f) % 360f) - 180f
+
+    override fun onResume() {
+        super.onResume()
+        val sm = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        val sensor = sm.getDefaultSensor(Sensor.TYPE_GRAVITY)
+            ?: sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        sensor?.let { sm.registerListener(gravityListener, it, SensorManager.SENSOR_DELAY_GAME) }
     }
 
     private fun rotationKey() = if (useFront) "rot_front" else "rot_back"
