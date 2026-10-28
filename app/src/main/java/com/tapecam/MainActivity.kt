@@ -5,6 +5,7 @@ import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -39,6 +40,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
     private val io: ExecutorService = Executors.newSingleThreadExecutor()
 
     private var cameraProvider: ProcessCameraProvider? = null
+    private var preview: Preview? = null
     private var useFront = false
     private var photoMode = false
     private var recorder: VhsRecorder? = null
@@ -143,9 +145,10 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
 
         val preview = Preview.Builder()
             .setResolutionSelector(resolution)
-            .setTargetRotation(ContextCompat.getDisplayOrDefault(this).rotation)
+            .setTargetRotation(displayRotation())
             .build()
         preview.setSurfaceProvider(renderer.surfaceProvider)
+        this.preview = preview
 
         try {
             provider.unbindAll()
@@ -292,7 +295,30 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
         renderer.setDisplaySurface(holder.surface, width, height)
+        syncRotation()
     }
+
+    // The activity is locked to landscape but starts in portrait for a moment, and
+    // with configChanges it is never recreated — so the rotation read at bind time
+    // can be stale. Re-read it whenever the screen settles and tell CameraX.
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        syncRotation()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) syncRotation()
+    }
+
+    private fun syncRotation() {
+        val p = preview ?: return
+        val r = displayRotation()
+        if (p.targetRotation != r) p.targetRotation = r
+    }
+
+    private fun displayRotation(): Int =
+        (previewView.display ?: ContextCompat.getDisplayOrDefault(this)).rotation
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
         renderer.setDisplaySurface(null, 0, 0)
