@@ -5,7 +5,11 @@ import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
 import android.content.pm.PackageManager
+import android.annotation.SuppressLint
 import android.content.res.Configuration
+import android.view.KeyEvent
+import android.view.ScaleGestureDetector
+import kotlin.math.ln
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -51,6 +55,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
     private var preview: Preview? = null
     private var camera: Camera? = null
     private var levelMode = false
+    private var zoomRatio = 1f
     private lateinit var btnLevel: TextView
     private var useFront = false
     private var photoMode = false
@@ -91,6 +96,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
         fxSeek = findViewById(R.id.fxSeek)
 
         previewView.holder.addCallback(this)
+        setupZoom()
 
         // Restore settings
         osd.dateEnabled = prefs.getBoolean("date_on", true)
@@ -187,6 +193,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
         try {
             provider.unbindAll()
             camera = provider.bindToLifecycle(this, selector, preview)
+            zoomRatio = 1f
             syncRotation()
         } catch (e: Exception) {
             Toast.makeText(this, "Camera unavailable: ${e.message}", Toast.LENGTH_LONG).show()
@@ -356,6 +363,45 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
         applyRotation()
     }
 
+    // ---------------------------------------------------------------- zoom
+
+    /** Pinch on the viewfinder to zoom; volume keys work like a camcorder rocker. */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupZoom() {
+        val detector = ScaleGestureDetector(this,
+            object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                override fun onScale(d: ScaleGestureDetector): Boolean {
+                    zoomBy(d.scaleFactor)
+                    return true
+                }
+            })
+        previewView.setOnTouchListener { _, ev -> detector.onTouchEvent(ev); true }
+    }
+
+    private fun zoomBy(factor: Float) {
+        val cam = camera ?: return
+        val state = cam.cameraInfo.zoomState.value ?: return
+        val min = state.minZoomRatio
+        val max = state.maxZoomRatio
+        val target = (zoomRatio * factor).coerceIn(min, max)
+        if (target == zoomRatio) { showZoomBar(min, max); return }
+        zoomRatio = target
+        cam.cameraControl.setZoomRatio(target)
+        showZoomBar(min, max)
+    }
+
+    private fun showZoomBar(min: Float, max: Float) {
+        // Log scale so the bar moves evenly as you zoom.
+        val f = if (max > min) (ln(zoomRatio / min) / ln(max / min)) else 0f
+        osd.showZoom(f)
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean = when (keyCode) {
+        KeyEvent.KEYCODE_VOLUME_UP -> { zoomBy(1.08f); true }
+        KeyEvent.KEYCODE_VOLUME_DOWN -> { zoomBy(1f / 1.08f); true }
+        else -> super.onKeyDown(keyCode, event)
+    }
+
     // ---------------------------------------------------------------- gravity / gyro
 
     /**
@@ -381,10 +427,10 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     }
 
-    private var gx = 9.8f        // start as if held in normal landscape
-    private var gy = 0f
-    private var levelAngle = 90f
-    private var snappedAngle = 90f
+    private var gx = 0f          // start as if held upright in portrait
+    private var gy = 9.8f
+    private var levelAngle = 0f
+    private var snappedAngle = 0f
 
     private fun applyRotation() {
         val base = if (levelMode) levelAngle else snappedAngle

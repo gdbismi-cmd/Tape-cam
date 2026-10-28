@@ -33,7 +33,8 @@ class VhsRecorder(private val context: Context, private val withAudio: Boolean) 
             mr.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             mr.setOutputFile(fd.fileDescriptor)
             mr.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-            mr.setVideoSize(VhsRenderer.VIDEO_W, VhsRenderer.VIDEO_H)
+            mr.setVideoSize(VhsRenderer.VIDEO_H, VhsRenderer.VIDEO_W)   // stored landscape
+            mr.setOrientationHint(90)                                     // played portrait
             mr.setVideoFrameRate(30)
             mr.setVideoEncodingBitRate(3_500_000)
             if (withAudio) {

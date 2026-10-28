@@ -37,12 +37,14 @@ import kotlin.random.Random
 class VhsRenderer(private val osd: OsdOverlay) : SurfaceTexture.OnFrameAvailableListener {
 
     companion object {
-        const val VIDEO_W = 960
-        const val VIDEO_H = 720
-        const val PHOTO_W = 1440
-        const val PHOTO_H = 1080
-        private const val TAPE_W = 640f   // virtual "tape" resolution for grain/scanlines
-        private const val TAPE_H = 480f
+        // Portrait 3:4 frame. Video is stored as 960x720 with a 90° rotation flag
+        // (the most widely supported encoder size); players show it upright.
+        const val VIDEO_W = 720
+        const val VIDEO_H = 960
+        const val PHOTO_W = 1080
+        const val PHOTO_H = 1440
+        private const val TAPE_W = 480f   // virtual "tape" resolution for grain/scanlines
+        private const val TAPE_H = 640f
         private const val EGL_RECORDABLE_ANDROID = 0x3142
         private const val TAG = "VhsRenderer"
     }
@@ -109,6 +111,21 @@ class VhsRenderer(private val osd: OsdOverlay) : SurfaceTexture.OnFrameAvailable
                  1f, -1f, 1f, 0f,
                 -1f,  1f, 0f, 1f,
                  1f,  1f, 1f, 1f,
+            ))
+            position(0)
+        }
+
+    /**
+     * Same picture, turned 90° counter-clockwise into the landscape encoder frame;
+     * the recorder's 90° orientation flag turns it back upright on playback.
+     */
+    private val encoderQuad: FloatBuffer = ByteBuffer.allocateDirect(16 * 4)
+        .order(ByteOrder.nativeOrder()).asFloatBuffer().apply {
+            put(floatArrayOf(
+                 1f, -1f, 0f, 0f,
+                 1f,  1f, 1f, 0f,
+                -1f, -1f, 0f, 1f,
+                -1f,  1f, 1f, 1f,
             ))
             position(0)
         }
@@ -225,7 +242,7 @@ class VhsRenderer(private val osd: OsdOverlay) : SurfaceTexture.OnFrameAvailable
         }
         if (encoderSurface != EGL14.EGL_NO_SURFACE) {
             makeCurrent(encoderSurface)
-            draw(VIDEO_W, VIDEO_H)
+            draw(VIDEO_H, VIDEO_W, encoderQuad)
             EGLExt.eglPresentationTimeANDROID(eglDisplay, encoderSurface, System.nanoTime())
             EGL14.eglSwapBuffers(eglDisplay, encoderSurface)
         }
@@ -235,7 +252,7 @@ class VhsRenderer(private val osd: OsdOverlay) : SurfaceTexture.OnFrameAvailable
         }
     }
 
-    private fun draw(w: Int, h: Int) {
+    private fun draw(w: Int, h: Int, q: FloatBuffer = quad) {
         GLES20.glViewport(0, 0, w, h)
         GLES20.glUseProgram(program)
 
@@ -252,11 +269,11 @@ class VhsRenderer(private val osd: OsdOverlay) : SurfaceTexture.OnFrameAvailable
         GLES20.glUniform1f(uGlitch, glitch)
         GLES20.glUniform2f(uRes, TAPE_W, TAPE_H)
 
-        quad.position(0)
-        GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 16, quad)
+        q.position(0)
+        GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 16, q)
         GLES20.glEnableVertexAttribArray(aPos)
-        quad.position(2)
-        GLES20.glVertexAttribPointer(aUv, 2, GLES20.GL_FLOAT, false, 16, quad)
+        q.position(2)
+        GLES20.glVertexAttribPointer(aUv, 2, GLES20.GL_FLOAT, false, 16, q)
         GLES20.glEnableVertexAttribArray(aUv)
 
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
@@ -277,7 +294,7 @@ class VhsRenderer(private val osd: OsdOverlay) : SurfaceTexture.OnFrameAvailable
         val iw = (if (swapped) bufH else bufW).toFloat()
         val ih = (if (swapped) bufW else bufH).toFloat()
         val ai = iw / ih          // natural-orientation image aspect
-        val ao = 4f / 3f          // output aspect
+        val ao = VIDEO_W.toFloat() / VIDEO_H   // output aspect (3:4)
 
         val deg = rotationDeg
         val rad = Math.toRadians(deg.toDouble())

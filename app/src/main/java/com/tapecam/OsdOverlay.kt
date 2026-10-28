@@ -6,19 +6,22 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.Typeface
+import android.os.SystemClock
 import java.util.Calendar
 import java.util.Locale
 
 /**
  * Draws the camcorder on-screen display (STBY / REC, tape counter, SP, battery,
- * date and time stamp) into a bitmap that the renderer uploads as a texture.
- * Only redraws when the visible text actually changes.
+ * zoom bar, date and time stamp) into a portrait 3:4 bitmap that the renderer
+ * uploads as a texture. Only redraws when what's visible actually changes.
  */
 class OsdOverlay {
 
     companion object {
-        const val W = 960
-        const val H = 720
+        const val W = 720
+        const val H = 960
+        private const val ZOOM_SHOW_MS = 2000L
+        private const val ZOOM_SEGMENTS = 16
         private val MONTHS = arrayOf("JAN.", "FEB.", "MAR.", "APR.", "MAY ", "JUN.",
             "JUL.", "AUG.", "SEP.", "OCT.", "NOV.", "DEC.")
     }
@@ -33,11 +36,22 @@ class OsdOverlay {
     @Volatile var dateOffsetMs = 0L
     @Volatile var photoMode = false
 
+    /** 0 = widest, 1 = full tele. */
+    @Volatile var zoomFraction = 0f
+        private set
+    @Volatile private var zoomShownUntil = 0L
+
+    /** Call whenever zoom changes; the W–T bar appears for a couple of seconds. */
+    fun showZoom(fraction: Float) {
+        zoomFraction = fraction.coerceIn(0f, 1f)
+        zoomShownUntil = SystemClock.elapsedRealtime() + ZOOM_SHOW_MS
+    }
+
     private var lastKey = ""
 
     private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-        textSize = 46f
+        textSize = 44f
         color = Color.WHITE
         setShadowLayer(3f, 3f, 3f, Color.argb(210, 0, 0, 0))
     }
@@ -47,7 +61,10 @@ class OsdOverlay {
         color = Color.WHITE
         setShadowLayer(3f, 3f, 3f, Color.argb(210, 0, 0, 0))
     }
-    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        setShadowLayer(2f, 2f, 2f, Color.argb(180, 0, 0, 0))
+    }
     private val red = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.rgb(235, 40, 40)
         setShadowLayer(3f, 3f, 3f, Color.argb(210, 0, 0, 0))
@@ -72,7 +89,10 @@ class OsdOverlay {
             String.format(Locale.US, "%d:%02d:%02d", s / 3600, (s / 60) % 60, s % 60)
         } else ""
 
-        val key = "$rec|$blink|$dateEnabled|$dateStr|$timeStr|$counter|$photoMode"
+        val zoomVisible = nowElapsedMs < zoomShownUntil
+        val zoomLit = if (zoomVisible) Math.round(zoomFraction * ZOOM_SEGMENTS) else -1
+
+        val key = "$rec|$blink|$dateEnabled|$dateStr|$timeStr|$counter|$photoMode|$zoomLit"
         if (key == lastKey) return false
         lastKey = key
 
@@ -81,27 +101,42 @@ class OsdOverlay {
         // Top left: status
         when {
             rec > 0 -> {
-                if (blink) canvas.drawCircle(78f, 82f, 15f, red)
-                canvas.drawText("REC", 104f, 98f, text)
-                canvas.drawText(counter, 60f, 160f, text)
+                if (blink) canvas.drawCircle(66f, 82f, 15f, red)
+                canvas.drawText("REC", 92f, 98f, text)
+                canvas.drawText(counter, 48f, 156f, text)
             }
-            photoMode -> canvas.drawText("PHOTO", 60f, 98f, text)
-            else -> canvas.drawText("STBY", 60f, 98f, text)
+            photoMode -> canvas.drawText("PHOTO", 48f, 98f, text)
+            else -> canvas.drawText("STBY", 48f, 98f, text)
         }
 
         // Top right: tape speed + battery
-        canvas.drawText("SP", 740f, 98f, text)
-        canvas.drawRect(820f, 66f, 892f, 100f, stroke)
-        canvas.drawRect(892f, 76f, 900f, 90f, fill)
+        canvas.drawText("SP", 512f, 98f, text)
+        canvas.drawRect(590f, 66f, 662f, 100f, stroke)
+        canvas.drawRect(662f, 76f, 670f, 90f, fill)
         for (i in 0 until 3) {
-            val x = 826f + i * 22f
+            val x = 596f + i * 22f
             canvas.drawRect(x, 72f, x + 16f, 94f, fill)
+        }
+
+        // Zoom bar: W ▮▮▮▮▯▯▯▯ T
+        if (zoomVisible) {
+            val y = 228f
+            canvas.drawText("W", 92f, y + 14f, text)
+            canvas.drawText("T", 602f, y + 14f, text)
+            val left = 136f
+            val right = 588f
+            val seg = (right - left) / ZOOM_SEGMENTS
+            for (i in 0 until ZOOM_SEGMENTS) {
+                val x = left + i * seg + 3f
+                if (i < zoomLit) canvas.drawRect(x, y - 14f, x + seg - 6f, y + 14f, fill)
+                else canvas.drawRect(x, y - 2f, x + seg - 6f, y + 2f, fill)
+            }
         }
 
         // Bottom left: date stamp
         if (dateEnabled) {
-            canvas.drawText(timeStr, 60f, 602f, text)
-            canvas.drawText(dateStr, 60f, 662f, text)
+            canvas.drawText(timeStr, 48f, H - 132f, text)
+            canvas.drawText(dateStr, 48f, H - 72f, text)
         }
         return true
     }
