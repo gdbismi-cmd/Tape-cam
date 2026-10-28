@@ -19,6 +19,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
@@ -41,6 +42,7 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var preview: Preview? = null
+    private var camera: Camera? = null
     private var useFront = false
     private var photoMode = false
     private var recorder: VhsRecorder? = null
@@ -109,6 +111,21 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
         }
         btnDate.setOnLongClickListener { pickDate(); true }
 
+        // Manual fallback: turn the picture 90° at a time (remembered per camera).
+        // Long-press resets to automatic.
+        val btnRotate = findViewById<TextView>(R.id.btnRotate)
+        btnRotate.setOnClickListener {
+            val key = rotationKey()
+            prefs.edit().putInt(key, (prefs.getInt(key, 0) + 90) % 360).apply()
+            syncRotation()
+        }
+        btnRotate.setOnLongClickListener {
+            prefs.edit().remove(rotationKey()).apply()
+            syncRotation()
+            toast("Rotation reset to automatic")
+            true
+        }
+
         updateUi()
         requestPermissions()
     }
@@ -152,7 +169,8 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
 
         try {
             provider.unbindAll()
-            provider.bindToLifecycle(this, selector, preview)
+            camera = provider.bindToLifecycle(this, selector, preview)
+            syncRotation()
         } catch (e: Exception) {
             Toast.makeText(this, "Camera unavailable: ${e.message}", Toast.LENGTH_LONG).show()
         }
@@ -311,11 +329,20 @@ class MainActivity : AppCompatActivity(), SurfaceHolder.Callback {
         if (hasFocus) syncRotation()
     }
 
+    /**
+     * Works out how far to turn the camera image from the sensor's mounting angle
+     * and the current screen rotation, plus any manual correction from ROTATE.
+     */
     private fun syncRotation() {
-        val p = preview ?: return
         val r = displayRotation()
-        if (p.targetRotation != r) p.targetRotation = r
+        preview?.let { if (it.targetRotation != r) it.targetRotation = r }
+        val cam = camera ?: return
+        val auto = cam.cameraInfo.getSensorRotationDegrees(r)
+        val manual = prefs.getInt(rotationKey(), 0)
+        renderer.rotationDeg = (auto + manual) % 360
     }
+
+    private fun rotationKey() = if (useFront) "rot_front" else "rot_back"
 
     private fun displayRotation(): Int =
         (previewView.display ?: ContextCompat.getDisplayOrDefault(this)).rotation

@@ -79,7 +79,8 @@ class VhsRenderer(private val osd: OsdOverlay) : SurfaceTexture.OnFrameAvailable
     private var camTexId = 0
     private var bufW = 1280
     private var bufH = 960
-    @Volatile private var rotationDeg = 0
+    /** Clockwise degrees to turn the camera buffer upright; set by the activity. */
+    @Volatile var rotationDeg = 0
     private val stMatrix = FloatArray(16)
     private val adjust = FloatArray(16)
     private val camMatrix = FloatArray(16)
@@ -122,9 +123,6 @@ class VhsRenderer(private val osd: OsdOverlay) : SurfaceTexture.OnFrameAvailable
             st.setDefaultBufferSize(res.width, res.height)
             val surface = Surface(st)
 
-            request.setTransformationInfoListener(glExecutor) { info ->
-                rotationDeg = info.rotationDegrees
-            }
             st.setOnFrameAvailableListener(this, handler)
 
             camTexture = st
