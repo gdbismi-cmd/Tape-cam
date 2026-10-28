@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Original cassette-tape glyph -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#ECE6D6" android:pathData="M28,36h52a4,4 0 0 1 4,4v28a4,4 0 0 1 -4,4h-52a4,4 0 0 1 -4,-4v-28a4,4 0 0 1 4,-4z" />
+    <path android:fillColor="#E53935" android:pathData="M30,42h48v8h-48z" />
+    <path android:fillColor="#1C1B22" android:pathData="M36,52h36a2,2 0 0 1 2,2v8a2,2 0 0 1 -2,2h-36a2,2 0 0 1 -2,-2v-8a2,2 0 0 1 2,-2z" />
+    <path android:fillColor="#ECE6D6" android:pathData="M44,58m-4,0a4,4 0 1 1 8,0a4,4 0 1 1 -8,0" />
+    <path android:fillColor="#ECE6D6" android:pathData="M64,58m-4,0a4,4 0 1 1 8,0a4,4 0 1 1 -8,0" />
+    <path android:fillColor="#9A9384" android:pathData="M40,72l4,-5h20l4,5z" />
+</vector>
